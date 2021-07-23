@@ -15,8 +15,6 @@
                               const containerHeight = fieldHolder.find(`input[name="CropperField_${me.attr('data-name')}_ContainerHeight"]`).val()
                               const actualContainerWidth = parseInt(me.width())
                               const actualContainerHeight = parseInt(me.height())
-                              console.log(actualContainerWidth)
-                              console.log(actualContainerHeight)
                               const widthRatio = actualContainerWidth / containerWidth
                               const heightRatio = actualContainerHeight / containerHeight
 
@@ -56,11 +54,11 @@
                               cropperInstance = cropper;
                             };
 
-          onElementShow($(this)[0], function() {
-            window.dispatchEvent(new Event('resize'))
-            setTimeout(() => {
+          onElementShow($(this)[0], visible => {
+            if (visible) {
+              window.dispatchEvent(new Event('resize'))
               doInit(me)
-            }, 300)
+            }
           })
 
           domWatcher($(this).parents('.cita-cropper-field').find('.uploadfield.field')[0], mutated =>{
