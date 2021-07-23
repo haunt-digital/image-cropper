@@ -1,10 +1,9 @@
-.cita-cropper {
-    margin: 12px 0 12px 0;
-    max-width: 698px !important;
+.cita-cropper-field .form-group.field.uploadfield {
+    padding: 0;
 }
 
-/* this hack to make the assets browser's search function to work.... */
-#AssetSearchForm {
-    position: relative;
-    z-index: 999999999;
+.cita-cropper-field .cita-cropper img {
+    display: block;
+    max-width: 100%;
+    height: auto;
 }

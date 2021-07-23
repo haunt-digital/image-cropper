@@ -1,93 +1,108 @@
-(function($)
-{
-    $.entwine('ss', function($)
-    {
-        $('.cita-cropper').entwine(
-        {
-            onmatch: function(e)
-            {
-                var parentWindow        =   $(parent.document);
-                if ($(this).find('img').length > 0) {
+(function($) {
+  $.entwine('ss', function($) {
+    $('.cita-cropper').entwine({
+      onmatch: function(e) {
+        if ($(this).find('img').length) {
+          var fieldHolder = $(this).parents('.cita-cropper-field:eq(0)'),
+              me          = $(this),
+              cropperInstance = null,
+              doInit      = function(me) {
+                              if (cropperInstance) {
+                                return
+                              }
 
-                    var thisCropper     =   $(this),
-                        thisForm        =   $(this).parents('form:eq(0)'),
-                        thisSrcRaw      =   thisForm.attr('action').split('/');
+                              const containerWidth = fieldHolder.find(`input[name="CropperField_${me.attr('data-name')}_ContainerWidth"]`).val()
+                              const containerHeight = fieldHolder.find(`input[name="CropperField_${me.attr('data-name')}_ContainerHeight"]`).val()
+                              const actualContainerWidth = parseInt(me.width())
+                              const actualContainerHeight = parseInt(me.height())
+                              console.log(actualContainerWidth)
+                              console.log(actualContainerHeight)
+                              const widthRatio = actualContainerWidth / containerWidth
+                              const heightRatio = actualContainerHeight / containerHeight
 
-                        thisSrcRaw.pop();
-                        thisSrc         =   thisSrcRaw.join('/') + '/edit',
-                        doInit          =   function(me) {
-                            var image           =   me.find('img')[0],
-                                ratio           =   parseFloat(thisForm.find('input[name="CropperRatio"]').val()),
-                                minWidth        =   me.attr('data-min-width'),
-                                minHeight       =   me.attr('data-min-height') ? me.attr('data-min-height') : 0,
-                                name            =   me.attr('data-name'),
-                                cords           =   {
-                                                        left    :   parseInt(thisForm.find('input[name="CropperX"]').val()),
-                                                        top     :   parseInt(thisForm.find('input[name="CropperY"]').val()),
-                                                        width   :   parseInt(thisForm.find('input[name="CropperWidth"]').val()),
-                                                        height  :   parseInt(thisForm.find('input[name="CropperHeight"]').val())
-                                                    },
-                                cropper         =   new Cropper(image,
-                                                    {
+                              var image           =   me.find('img')[0],
+                                  name            =   me.attr('data-name'),
+                                  cords           =   {
+                                                          left    :   parseInt(fieldHolder.find(`input[name="CropperField_${name}_CropperX"]`).val() * widthRatio),
+                                                          top     :   parseInt(fieldHolder.find(`input[name="CropperField_${name}_CropperY"]`).val() * heightRatio),
+                                                          width   :   parseInt(fieldHolder.find(`input[name="CropperField_${name}_CropperWidth"]`).val() * widthRatio),
+                                                          height  :   parseInt(fieldHolder.find(`input[name="CropperField_${name}_CropperHeight"]`).val() * heightRatio),
+                                                      },
+                                  ratio           =   fieldHolder.find(`input[name="CropperField_${name}_CropperRatio"]`).val(),
+                                  cropper         =   new Cropper(image, {
                                                         viewMode: 3,
                                                         aspectRatio: ratio ? ratio : NaN,
                                                         zoomable: false,
-                                                        minContainerWidth: minWidth,
-                                                        minContainerHeight: minHeight,
-                                                        crop: function(e)
-                                                        {
-                                                            var x = Math.round(cropper.getCanvasData().left * -1),
-                                                                y = Math.round(cropper.getCanvasData().top * -1),
-                                                                w = Math.round(cropper.getCanvasData().width),
+                                                        crop: function(e) {
+                                                            var w = Math.round(cropper.getCanvasData().width),
                                                                 h = Math.round(cropper.getCanvasData().height),
                                                                 cx = Math.round(cropper.getCropBoxData().left),
                                                                 cy = Math.round(cropper.getCropBoxData().top),
                                                                 cw = Math.round(cropper.getCropBoxData().width),
                                                                 ch = Math.round(cropper.getCropBoxData().height);
 
-                                                            thisForm.find('input[name="ContainerX"]').val(x);
-                                                            thisForm.find('input[name="ContainerY"]').val(y);
-                                                            thisForm.find('input[name="ContainerWidth"]').val(w);
-                                                            thisForm.find('input[name="ContainerHeight"]').val(h);
-
-                                                            thisForm.find('input[name="CropperX"]').val(cx);
-                                                            thisForm.find('input[name="CropperY"]').val(cy);
-                                                            thisForm.find('input[name="CropperWidth"]').val(cw);
-                                                            thisForm.find('input[name="CropperHeight"]').val(ch);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_ContainerWidth"]`).val(w);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_ContainerHeight"]`).val(h);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_CropperX"]`).val(cx);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_CropperY"]`).val(cy);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_CropperWidth"]`).val(cw);
+                                                            fieldHolder.find(`input[name="CropperField_${name}_CropperHeight"]`).val(ch);
                                                         },
-                                                        ready: function()
-                                                        {
+                                                        ready: function() {
                                                             cropper.setCropBoxData(cords);
                                                         }
-                                                    });
-                        };
+                                                      });
 
-                    if (parseInt($(this).find('img').attr('width')) > 0) {
-                        doInit(thisCropper);
-                    } else {
-                        $(this).find('img').on('load', function(e)
-                        {
-                            var width   =   $(this).width(),
-                                height  =   $(this).height(),
-                                ratio   =   width > 666 ? (666 / width) : 1,
-                                calc_width  =   width * ratio;
-                                calc_height =   height * ratio;
+                              cropperInstance = cropper;
+                            };
 
-                            $(this).attr('width', width);
-                            $(this).attr('height', height);
-                            $(this).parents('.cita-cropper:eq(0)').width(calc_width);
-                            $(this).parents('.cita-cropper:eq(0)').height(calc_height);
-                            $(this).parents('.cita-cropper:eq(0)').data('min-width', calc_width);
-                            $(this).parents('.cita-cropper:eq(0)').data('min-height', calc_height);
+          onElementShow($(this)[0], function() {
+            window.dispatchEvent(new Event('resize'))
+            setTimeout(() => {
+              doInit(me)
+            }, 300)
+          })
 
-                            doInit(thisCropper);
-                        });
+          domWatcher($(this).parents('.cita-cropper-field').find('.uploadfield.field')[0], mutated =>{
+            const list = mutated.filter(o => {
+              return o.type == 'childList'
+            })
 
-                        $(this).removeAttr('style');
-                        $(this).find('img').removeAttr('width').removeAttr('height');
-                    }
-                }
+            const uploadedFileRemoved = list.find(o => o.removedNodes.length && o.removedNodes[0].classList && o.removedNodes[0].classList.contains('uploadfield-item'))
+            if (uploadedFileRemoved) {
+              cropperInstance.destroy()
+              me.find('img').remove()
             }
-        });
+          })
+        }
+      }
     });
+  });
+
+  function onElementShow(element, callback) {
+    var options = {
+      root: document.documentElement,
+    };
+
+    var observer = new IntersectionObserver((entries, observer) => {
+      entries.forEach(entry => {
+        callback(entry.intersectionRatio > 0);
+      });
+    }, options);
+
+    observer.observe(element);
+  }
+
+  function domWatcher(selector, callback) {
+    const targetNode = (typeof selector == 'object') ? selector : document.querySelector(selector);
+    const observerOptions = {
+      childList: true,
+      attributes: true,
+      // Omit (or set to false) to observe only changes to the parent node
+      subtree: true
+    }
+
+    const observer = new MutationObserver(callback);
+    observer.observe(targetNode, observerOptions);
+  }
 }(jQuery));

@@ -8,6 +8,14 @@ SilverStripe\Assets\Storage\DBFile:
   extensions:
     - Cita\ImageCropper\Extension\CroppableImageExtension
 
+SilverStripe\Admin\LeftAndMain:
+  extra_requirements_css:
+    - cita/image-cropper:client/js/cropperjs/dist/cropper.min.css
+    - cita/image-cropper:client/css/cita-cropper.css
+  extra_requirements_javascript:
+    - cita/image-cropper:client/js/cropperjs/dist/cropper.min.js
+    - cita/image-cropper:client/js/cita-cropper.js
+
 # SilverStripe\Admin\LeftAndMain:
 #   extra_requirements_javascript:
 #     - 'resources/vendor/cita/image-cropper/client/js/s3-workaround.js'

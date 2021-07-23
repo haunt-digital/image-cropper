@@ -2,228 +2,284 @@
 
 namespace Cita\ImageCropper\Fields;
 
-use SilverStripe\Forms\FieldList;
-use SilverStripe\Forms\FormField;
-use SilverStripe\View\Requirements;
-use SilverStripe\Forms\FormAction;
-use Cita\ImageCropper\Model\CitaCroppableImage;
-use SilverStripe\Forms\HeaderField;
-use SilverStripe\Forms\Form;
+use Cita\ImageCropper\Model\CitaCroppableImage as Picture;
+use SilverStripe\AssetAdmin\Forms\UploadField;
+use SilverStripe\Forms\CompositeField;
+use SilverStripe\Forms\GridField\GridField;
+use SilverStripe\Forms\GridField\GridField_ActionMenu;
+use SilverStripe\Forms\GridField\GridFieldConfig;
+use SilverStripe\Forms\GridField\GridFieldDataColumns;
+use SilverStripe\Forms\GridField\GridFieldDeleteAction;
+use SilverStripe\Forms\GridField\GridFieldDetailForm;
+use SilverStripe\Forms\GridField\GridFieldEditButton;
+use SilverStripe\Forms\GridField\GridFieldPaginator;
+use SilverStripe\Forms\GridField\GridFieldSortableHeader;
 use SilverStripe\Forms\HiddenField;
-use SilverStripe\ORM\ValidationException;
-use SilverStripe\Control\Controller;
+use SilverStripe\Forms\LiteralField;
+use SilverStripe\ORM\HasManyList;
+use SilverStripe\ORM\ManyManyList;
+use Symbiote\GridFieldExtensions\GridFieldOrderableRows;
 
-class CroppableImageField extends FormField
+class CroppableImageField extends CompositeField
 {
-    /**
-     * @var Boolean
-     **/
-    protected $isFrontend = false;
-    protected $folderName = false;
+    protected $fields = [];
+    protected $picture;
+    protected $pictureTitle;
+    protected $desktopImage;
+    protected $tabletImage;
+    protected $phoneImage;
+    protected $picDesktopWidth;
+    protected $picDesktopHeight;
+    protected $picTabletWidth;
+    protected $picTabletHeight;
+    protected $picPhoneWidth;
+    protected $picPhoneHeight;
+    protected $manyMode = false;
+    protected $performDelete = false;
+    protected $sortField;
+    protected $dbFields = [];
+    protected $dataToSave = [];
+    protected $ratio;
 
-    /**
-     * @var CroppableImage
-     **/
-    protected $linkObject;
+    public function __construct($name, $title = null, $owner = null)
+    {
+        $this->picture = $owner->{$name}();
+        $this->dbFields = array_keys(Picture::singleton()->config()->db);
 
-    /**
-     * List the allowed included link types.  If null all are allowed.
-     *
-     * @var array
-     **/
-    protected $allowed_types = null;
+        $this->manyMode = $this->picture instanceof ManyManyList || $this->picture instanceof HasManyList;
 
-    private static $allowed_actions = [
-        'CroppableImageForm',
-        'CroppableImageFormHTML',
-        'doSaveCroppableImage',
-        'doRemoveCroppableImage'
-    ];
+        if ($this->manyMode) {
+            $this->initManyMode($name);
+        } else {
+            $this->initSingleMode($name, $this->picture);
+        }
+
+        parent::__construct($this->fields);
+
+        $this->setName($name);
+        $this->setTitle($title ?? self::name_to_label($name));
+
+        $this->addExtraClass('cita-cropper-field');
+
+        if ($this->manyMode) {
+            $this->addExtraClass('multi-mode');
+        }
+    }
+
+    public function setAdditionalDBFields($fields)
+    {
+        if (!empty($fields)) {
+            $this->dbFields = array_merge($this->dbFields, $fields);
+        }
+
+        return $this;
+    }
+
+    public function setDimensions($dimensions)
+    {
+        foreach ($dimensions as $device => $dimension) {
+            $dimension = (object) $dimension;
+            $deviceFieldWidth = "pic{$device}Width";
+            $deviceFieldHeight = "pic{$device}Height";
+
+            $this->{$deviceFieldWidth} = $dimension->Width;
+            $this->{$deviceFieldHeight} = $dimension->Height;
+
+            if (!empty($this->fields[$device])) {
+                $this->fields[$device]->setDescription("Width: {$dimension->Width}px, Height: {$dimension->Height}px");
+            }
+        }
+
+        return $this;
+    }
+
+    public function hasData()
+    {
+        return true;
+    }
+
+    public function setSubmittedValue($value, $data = null)
+    {
+        $name = $this->name;
+
+        if ($data && !empty($data["CropperField_{$name}"]["Files"])) {
+            foreach ($this->dbFields as $fieldName) {
+                $localisedFieldName = "CropperField_{$name}_{$fieldName}";
+                if (isset($data[$localisedFieldName])) {
+                    $this->dataToSave[$fieldName] = $data[$localisedFieldName];
+                }
+            }
+        } else {
+            $this->performDelete = true;
+        }
+
+        return $this;
+    }
+
+    public function saveInto($data)
+    {
+        if ($this->name) {
+            if ($this->manyMode) {
+                $this->saveMany($data);
+            } else {
+                $this->saveSingle($data);
+            }
+        }
+    }
+
+    public function setSortField($fieldName)
+    {
+        if ($this->sortField) {
+            $this->sortField->setSortField($fieldName);
+        }
+
+        return $this;
+    }
 
     public function setCropperRatio($ratio)
     {
-        $this->Ratio        =   $ratio;
+        $this->Ratio = $ratio;
+
+        if (isset($this->fields['CropperRatio'])) {
+            $this->fields['CropperRatio']->setValue($ratio);
+        }
+
         return $this;
     }
 
-    public function Field($properties = [])
+    public function setFolderName($folderName)
     {
-        Requirements::css('cita/image-cropper: client/css/cita-croppable.css');
-        Requirements::css('cita/image-cropper: client/css/cita-cropper.css');
-        Requirements::javascript('cita/image-cropper: client/js/cita-croppable-field.js');
+        $this->fields['Uploader']->setFolderName($folderName);
 
-        return parent::Field();
+        return $this;
     }
 
-    /**
-     * The CroppableImageForm for the dialog window
-     *
-     * @return Form
-     **/
-    public function CroppableImageForm()
+    private function initManyMode($name, $title = null)
     {
-        $image = $this->getCroppableImageObject();
+        $this->initSingleMode($name);
 
-        $action = FormAction::create('doSaveCroppableImage', _t('CroppableImageable.SAVE', 'Save'))->setUseButtonTag('true')->addExtraClass('btn-primary font-icon-save');
-
-        if (!$this->isFrontend) {
-            $action->addExtraClass('btn-primary font-icon-save')->setAttribute('data-icon', 'accept');
-        }
-
-        $image = null;
-        if ($CroppableImageID = (int) $this->request->getVar('CitaCroppableImageID')) {
-            $image = CitaCroppableImage::get()->byID($CroppableImageID);
-        }
-        $image = $image ? $image : singleton(CitaCroppableImage::class);
-
-        // $image->setAllowedTypes($this->getAllowedTypes());
-        $fields = $image->getCMSFields();
-
-        $title = $image ? _t('CroppableImageable.EDITIMAGE', 'Edit Image') : _t('CroppableImageable.ADDIMAGE', 'Add Image');
-        $fields->insertBefore(HeaderField::create('CroppableImageHeader', $title), _t('CroppableImageable.TITLE', 'Title'));
-        $actions = FieldList::create($action);
-        $form = Form::create($this, 'CroppableImageForm', $fields, $actions);
-
-        if ($image) {
-            $form->loadDataFrom($image);
-            if (!empty($this->folderName)) {
-                $fields->fieldByName('Root.Main.Original')->setFolderName($this->folderName);
-            }
-
-            $fields->push(HiddenField::create('CropperRatio')->setValue($this->Ratio));
-            $fields->push(HiddenField::create('ContainerX')->setValue($image->ContainerX));
-            $fields->push(HiddenField::create('ContainerX')->setValue($image->ContainerX));
-            $fields->push(HiddenField::create('ContainerY')->setValue($image->ContainerY));
-            $fields->push(HiddenField::create('ContainerWidth')->setValue($image->ContainerWidth));
-            $fields->push(HiddenField::create('ContainerHeight')->setValue($image->ContainerHeight));
-            $fields->push(HiddenField::create('CropperX')->setValue($image->CropperX));
-            $fields->push(HiddenField::create('CropperY')->setValue($image->CropperY));
-            $fields->push(HiddenField::create('CropperWidth')->setValue($image->CropperWidth));
-            $fields->push(HiddenField::create('CropperHeight')->setValue($image->CropperHeight));
-        }
-
-        $this->owner->extend('updateLinkForm', $form);
-
-        return $form;
+        $this->fields['GridField'] = GridField::create(
+            "CropperField_{$name}",
+            'Uploaded pictures',
+            $this->picture
+        )->setConfig($this->makeConfig())
+            ->addExtraClass('picture-field-gridfield')
+        ;
     }
 
-
-    /**
-     * Either updates the current link or creates a new one
-     * Returns field template to update the interface
-     * @return string
-     **/
-    public function doSaveCroppableImage($data, $form)
+    private function makeConfig()
     {
-        $link = $this->getCroppableImageObject() ? $this->getCroppableImageObject() : CitaCroppableImage::create();
-        $form->saveInto($link);
-        try {
-            $link->write();
-        } catch (ValidationException $e) {
-            $form->sessionMessage($e->getMessage(), 'bad');
-            return $form->forTemplate();
-        }
-        $this->setValue($link->ID);
-        $this->setForm($form);
-        return $this->FieldHolder();
+        $config = GridFieldConfig::create();
+
+        $config->addComponent($sort = new GridFieldSortableHeader());
+        $config->addComponent($columns = new GridFieldDataColumns());
+        $config->addComponent(new GridFieldEditButton());
+        $config->addComponent(new GridFieldDeleteAction());
+        $config->addComponent(new GridField_ActionMenu());
+        $config->addComponent($pagination = new GridFieldPaginator(null));
+        $config->addComponent(new GridFieldDetailForm());
+        $config->addComponent($this->sortField = GridFieldOrderableRows::create('Sort'));
+
+        $columns->setDisplayFields([
+            'Desktop.CMSThumbnail' => 'Desktop',
+            'Tablet.CMSThumbnail' => 'Tablet',
+            'Phone.CMSThumbnail' => 'Mobile',
+            'Text' => [
+                'title' => 'Title & caption',
+                'callback' => function ($pic) {
+                    return '<dl>
+                        <dt>Title</dt>
+                        <dd>' . ($pic->Title ?? '<em>not set</em>') . '</dd>
+                        <dt>Caption</dt>
+                        <dd>' . ($pic->Caption ?? '<em>not set</em>') . '</dd>
+                    </dl>';
+                },
+            ],
+        ])->setFieldCasting([
+            'Text' => 'HTMLFragment->RAW',
+        ]);
+
+        $sort->setThrowExceptionOnBadDataType(false);
+        $pagination->setThrowExceptionOnBadDataType(false);
+
+        return $config;
     }
 
-
-    /**
-     * Delete link action - TODO
-     *
-     * @return string
-     **/
-    public function doRemoveCroppableImage()
+    private function initSingleMode($name, $picture = null)
     {
-        if ($image      =   CitaCroppableImage::get()->byID($this->value)) {
-            $image->delete();
-        }
+        $this->fields['Uploader'] = UploadField::create(
+            "CropperField_{$name}",
+            'Image'
+        )
+            ->setAllowedMaxFileNumber(1)
+            ->setAllowedExtensions(['png', 'gif', 'jpeg', 'jpg'])
+        ;
 
-        $this->setValue('');
-        return $this->FieldHolder();
+        $this->fields['CropperRatio'] = HiddenField::create("CropperField_{$name}_CropperRatio")->setValue($this->Ratio);
+        $this->fields['ContainerWidth'] = HiddenField::create("CropperField_{$name}_ContainerWidth")->setValue($picture->ContainerWidth);
+        $this->fields['ContainerHeight'] = HiddenField::create("CropperField_{$name}_ContainerHeight")->setValue($picture->ContainerHeight);
+        $this->fields['CropperX'] = HiddenField::create("CropperField_{$name}_CropperX")->setValue($picture->CropperX);
+        $this->fields['CropperY'] = HiddenField::create("CropperField_{$name}_CropperY")->setValue($picture->CropperY);
+        $this->fields['CropperWidth'] = HiddenField::create("CropperField_{$name}_CropperWidth")->setValue($picture->CropperWidth);
+        $this->fields['CropperHeight'] = HiddenField::create("CropperField_{$name}_CropperHeight")->setValue($picture->CropperHeight);
+
+        $hasImage = $picture && $picture->exists() && $picture->Original()->exists();
+
+        $this->fields['Canvas'] = LiteralField::create(
+            "CropperField_{$name}_Canvas",
+            '<div class="cita-cropper-holder">
+                <div class="cita-cropper" data-name="' . $name . '">
+                    ' . ($hasImage ? ('<img src="' . $picture->Original()->ScaleWidth(768)->URL . '?timestamp=' . time() . '" />') : '') . '
+                </div>
+            </div>'
+        );
+
+        if ($hasImage) {
+            $this->fields['Uploader']
+                ->setValue($picture->Original())
+                ->addExtraClass('is-collapsed')
+            ;
+        }
     }
 
-
-    /**
-     * Returns the current link object
-     *
-     * @return CitaCroppableImage
-     **/
-    public function getCroppableImageObject()
+    private function saveMany(&$data)
     {
-        $requestID = Controller::curr()->request->requestVar('CroppableImageID');
+        if ($picID = $this->saveSingle($data, true)) {
+            $this->picture->add($picID);
+        }
+    }
 
-        if ($requestID == '0' && !$this->Value()) {
+    private function saveSingle(&$data, $return = false)
+    {
+        $name = $this->name;
+
+        if ($this->performDelete && $data->{$name}()->exists()) {
+            $data->{$name}()->delete();
+
             return;
         }
 
-        if (!$this->linkObject) {
-            $id = $this->Value() ? $this->Value() : $requestID;
-            if ((int) $id) {
-                $this->linkObject = CitaCroppableImage::get()->byID($id);
-            }
-        }
-        return $this->linkObject;
-    }
+        $pic = $return ? Picture::create() : ($data->{$name}()->exists() ? $data->{$name}() : Picture::create());
 
+        $image = $this->fields['Uploader']->value();
 
-    /**
-     * Returns the HTML of the CroppableImageForm for the dialog
-     *
-     * @return string
-     **/
-    public function CroppableImageFormHTML()
-    {
-        return $this->CroppableImageForm()->forTemplate();
-    }
-
-
-    public function getIsFrontend()
-    {
-        return $this->isFrontend;
-    }
-
-
-    public function setIsFrontend($bool)
-    {
-        $this->isFrontend = $bool;
-        return $this->this;
-    }
-
-    public function setAllowedTypes($types = array())
-    {
-        $this->allowed_types = $types;
-        return $this;
-    }
-
-    public function getAllowedTypes()
-    {
-        return $this->allowed_types;
-    }
-
-    public function getEditLink()
-    {
-        return Controller::curr()->Link() . 'EditForm/field/' . $this->name . '/CroppableImageFormHTML?CitaCroppableImageID=' . $this->value;
-        // https://basekit.leochen.co.nz/admin/settings/EditForm/field/LinkID/LinkFormHTML?LinkID=0
-    }
-
-    public function getCroppedImage()
-    {
-        if ($id =   $this->value) {
-            return CitaCroppableImage::get()->byID($id);
+        if (empty($image)) {
+            return;
         }
 
-        return null;
-    }
+        $image = !empty($image) && !empty($image['Files']) ? $image['Files'][0] : null;
+        $pic = $pic->update(array_merge(
+            $this->dataToSave,
+            [
+                'OriginalID' => $image,
+            ]
+        ));
 
-    public function timestamp()
-    {
-        return time();
-    }
+        if ($return) {
+            return $pic->write();
+        }
 
-    public function setFolderName($folderName) {
-        $this->folderName = $folderName;
-        return $this;
+        $this->setValue($pic->write());
+        $data = $data->setCastedField($name, $this->dataValue());
     }
 }
