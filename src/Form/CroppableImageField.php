@@ -24,19 +24,7 @@ class CroppableImageField extends CompositeField
 {
     protected $fields = [];
     protected $picture;
-    protected $pictureTitle;
-    protected $desktopImage;
-    protected $tabletImage;
-    protected $phoneImage;
-    protected $picDesktopWidth;
-    protected $picDesktopHeight;
-    protected $picTabletWidth;
-    protected $picTabletHeight;
-    protected $picPhoneWidth;
-    protected $picPhoneHeight;
-    protected $manyMode = false;
     protected $performDelete = false;
-    protected $sortField;
     protected $dbFields = [];
     protected $dataToSave = [];
     protected $ratio;
@@ -44,15 +32,14 @@ class CroppableImageField extends CompositeField
     public function __construct($name, $title = null, $owner = null)
     {
         $this->picture = $owner->{$name}();
+        if ($this->picture instanceof ManyManyList || $this->picture instanceof HasManyList) {
+            throw new \Exception("{$name}() is not a HasOne relation!", 1);
+            die;
+        }
+
         $this->dbFields = array_keys(Picture::singleton()->config()->db);
 
-        $this->manyMode = $this->picture instanceof ManyManyList || $this->picture instanceof HasManyList;
-
-        if ($this->manyMode) {
-            $this->initManyMode($name);
-        } else {
-            $this->initSingleMode($name, $this->picture);
-        }
+        $this->initSingleMode($name, $this->picture);
 
         parent::__construct($this->fields);
 
@@ -60,10 +47,6 @@ class CroppableImageField extends CompositeField
         $this->setTitle($title ?? self::name_to_label($name));
 
         $this->addExtraClass('cita-cropper-field');
-
-        if ($this->manyMode) {
-            $this->addExtraClass('multi-mode');
-        }
     }
 
     public function setAdditionalDBFields($fields)
@@ -119,21 +102,33 @@ class CroppableImageField extends CompositeField
     public function saveInto($data)
     {
         if ($this->name) {
-            if ($this->manyMode) {
-                $this->saveMany($data);
-            } else {
-                $this->saveSingle($data);
+            $name = $this->name;
+
+            if ($this->performDelete && $data->{$name}()->exists()) {
+                $data->{$name}()->delete();
+
+                return;
             }
-        }
-    }
 
-    public function setSortField($fieldName)
-    {
-        if ($this->sortField) {
-            $this->sortField->setSortField($fieldName);
-        }
+            $pic = $data->{$name}()->exists() ? $data->{$name}() : Picture::create();
 
-        return $this;
+            $image = $this->fields['Uploader']->value();
+
+            if (empty($image)) {
+                return;
+            }
+
+            $image = !empty($image) && !empty($image['Files']) ? $image['Files'][0] : null;
+            $pic = $pic->update(array_merge(
+                $this->dataToSave,
+                [
+                    'OriginalID' => $image,
+                ]
+            ));
+
+            $this->setValue($pic->write());
+            $data = $data->setCastedField($name, $this->dataValue());
+        }
     }
 
     public function setCropperRatio($ratio)
@@ -152,57 +147,6 @@ class CroppableImageField extends CompositeField
         $this->fields['Uploader']->setFolderName($folderName);
 
         return $this;
-    }
-
-    private function initManyMode($name, $title = null)
-    {
-        $this->initSingleMode($name);
-
-        $this->fields['GridField'] = GridField::create(
-            "CropperField_{$name}",
-            'Uploaded pictures',
-            $this->picture
-        )->setConfig($this->makeConfig())
-            ->addExtraClass('picture-field-gridfield')
-        ;
-    }
-
-    private function makeConfig()
-    {
-        $config = GridFieldConfig::create();
-
-        $config->addComponent($sort = new GridFieldSortableHeader());
-        $config->addComponent($columns = new GridFieldDataColumns());
-        $config->addComponent(new GridFieldEditButton());
-        $config->addComponent(new GridFieldDeleteAction());
-        $config->addComponent(new GridField_ActionMenu());
-        $config->addComponent($pagination = new GridFieldPaginator(null));
-        $config->addComponent(new GridFieldDetailForm());
-        $config->addComponent($this->sortField = GridFieldOrderableRows::create('Sort'));
-
-        $columns->setDisplayFields([
-            'Desktop.CMSThumbnail' => 'Desktop',
-            'Tablet.CMSThumbnail' => 'Tablet',
-            'Phone.CMSThumbnail' => 'Mobile',
-            'Text' => [
-                'title' => 'Title & caption',
-                'callback' => function ($pic) {
-                    return '<dl>
-                        <dt>Title</dt>
-                        <dd>' . ($pic->Title ?? '<em>not set</em>') . '</dd>
-                        <dt>Caption</dt>
-                        <dd>' . ($pic->Caption ?? '<em>not set</em>') . '</dd>
-                    </dl>';
-                },
-            ],
-        ])->setFieldCasting([
-            'Text' => 'HTMLFragment->RAW',
-        ]);
-
-        $sort->setThrowExceptionOnBadDataType(false);
-        $pagination->setThrowExceptionOnBadDataType(false);
-
-        return $config;
     }
 
     private function initSingleMode($name, $picture = null)
@@ -240,46 +184,5 @@ class CroppableImageField extends CompositeField
                 ->addExtraClass('is-collapsed')
             ;
         }
-    }
-
-    private function saveMany(&$data)
-    {
-        if ($picID = $this->saveSingle($data, true)) {
-            $this->picture->add($picID);
-        }
-    }
-
-    private function saveSingle(&$data, $return = false)
-    {
-        $name = $this->name;
-
-        if ($this->performDelete && $data->{$name}()->exists()) {
-            $data->{$name}()->delete();
-
-            return;
-        }
-
-        $pic = $return ? Picture::create() : ($data->{$name}()->exists() ? $data->{$name}() : Picture::create());
-
-        $image = $this->fields['Uploader']->value();
-
-        if (empty($image)) {
-            return;
-        }
-
-        $image = !empty($image) && !empty($image['Files']) ? $image['Files'][0] : null;
-        $pic = $pic->update(array_merge(
-            $this->dataToSave,
-            [
-                'OriginalID' => $image,
-            ]
-        ));
-
-        if ($return) {
-            return $pic->write();
-        }
-
-        $this->setValue($pic->write());
-        $data = $data->setCastedField($name, $this->dataValue());
     }
 }
