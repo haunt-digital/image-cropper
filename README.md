@@ -26,10 +26,10 @@ It's a continious development of Salted Herring's Cropper Field for SilverStripe
         $fields = parent::getCMSFields();
         ...
         // adding a free cropper
-        $fields->addFieldToTab(TAB_NAME, CroppableImageField::create('PhotoID', A_TITLE_TO_THE_FILED));
+        $fields->addFieldToTab(TAB_NAME, CroppableImageField::create('Photo', A_TITLE_TO_THE_FILED, $this));
 
         // adding cropper with ratio
-        $fields->addFieldToTab(TAB_NAME, CroppableImageField::create('PhotoID', A_TITLE_TO_THE_FILED)->setCropperRatio(16/9));
+        $fields->addFieldToTab(TAB_NAME, CroppableImageField::create('Photo', A_TITLE_TO_THE_FILED, $this)->setCropperRatio(16/9));
         ...
         return $fields;        
     }
